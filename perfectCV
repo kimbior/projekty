@@ -1,0 +1,279 @@
+import requests
+from bs4 import BeautifulSoup
+import mysql.connector
+import MySQLdb, sys
+from collections import OrderedDict
+
+
+class MysqlPython:
+
+    __instance   = None
+    __host       = None
+    __user       = None
+    __password   = None
+    __database   = None
+    __session    = None
+    __connection = None
+
+    def __init__(self, host='localhost', user='root', password='', database=''):
+        self.__host     = host
+        self.__user     = user
+        self.__password = password
+        self.__database = database
+    ## End def __init__
+
+    def __open(self):
+        try:
+            cnx = MySQLdb.connect(self.__host, self.__user, self.__password, self.__database)
+            self.__connection = cnx
+            self.__session    = cnx.cursor()
+        except MySQLdb.Error as e:
+            print("Error %d: %s" % (e.args[0],e.args[1]))
+    ## End def __open
+
+    def __close(self):
+        self.__session.close()
+        self.__connection.close()
+    ## End def __close
+
+    def select(self, table, where=None, *args, **kwargs):
+        result = None
+        query = 'SELECT '
+        keys = args
+        values = tuple(kwargs.values())
+        l = len(keys) - 1
+
+        if keys == ():
+            query +="*"
+
+        else:
+            for i, key in enumerate(keys):
+                query += "`"+key+"`"
+                if i < l:
+                    query += ","
+            ## End for keys
+
+        query += ' FROM %s' % table
+
+        if where:
+            query += " WHERE %s" % where
+
+
+        self.__open()
+        self.__session.execute(query, values)
+        number_rows = self.__session.rowcount
+        number_columns = len(self.__session.description)
+
+        if number_rows >= 1 and number_columns > 1:
+            result = [item for item in self.__session.fetchall()]
+        else:
+            result = [item[0] for item in self.__session.fetchall()]
+        self.__close()
+
+        return result
+    ## End def select
+
+    def update(self, table, where=None, *args, **kwargs):
+        query  = "UPDATE %s SET " % table
+        keys   = kwargs.keys()
+        values = tuple(kwargs.values()) + tuple(args)
+        l = len(keys) - 1
+        for i, key in enumerate(keys):
+            query += "`"+key+"` = %s"
+            if i < l:
+                query += ","
+            ## End if i less than 1
+        ## End for keys
+        query += " WHERE %s" % where
+
+        self.__open()
+        self.__session.execute(query, values)
+        self.__connection.commit()
+
+        # Obtain rows affected
+        update_rows = self.__session.rowcount
+        self.__close()
+
+        return update_rows
+    ## End function update
+
+    def insert(self, table, *args, **kwargs):
+        values = None
+        query = "INSERT INTO %s " % table
+        if kwargs:
+            keys = kwargs.keys()
+            values = tuple(kwargs.values())
+            query += "(" + ",".join(["`%s`" % key for key in keys]) + ") VALUES (" + ",".join(
+                ["%s"] * len(values)) + ")"
+
+        elif args:
+            values = args
+            query += " VALUES(" + ",".join(["%s"] * len(values)) + ")"
+            print('args')
+
+        self.__open()
+        self.__session.execute(query, values)
+        self.__connection.commit()
+        self.__close()
+        return self.__session.lastrowid
+
+    def delete(self, table, where=None, *args):
+        query = "DELETE FROM %s" % table
+        if where:
+            query += ' WHERE %s' % where
+
+        values = tuple(args)
+
+        self.__open()
+        self.__session.execute(query, values)
+        self.__connection.commit()
+
+        # Obtain rows affected
+        delete_rows = self.__session.rowcount
+        self.__close()
+
+        return delete_rows
+    ## End def delete
+
+
+    def show(self, table):
+        result = None
+        query = f'SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = "{table}" '
+
+        self.__open()
+        self.__session.execute(query)
+        result = (self.__session.fetchall())
+        self.__close()
+        column_names = [column[0] for column in result]
+        return column_names
+
+    def check_comp(self,name_table,name):
+        name_row_id,name_row = db.show(name_table)[0],db.show(name_table)[1]
+        _selector_ = db.select(f'{name_table}', f"{name_row} LIKE '{name}'", f'{name_row}',f'{name_row_id}')
+
+        if _selector_:
+            return _selector_[0][1]
+        else:
+            return 'no databases'
+
+    def check_cat(self,name_table,category_name):
+        name_row_id,name_row = db.show(name_table)[0],db.show(name_table)[1]
+        _selector_ = db.select(f'{name_table}', f"{name_row} LIKE '{category_name}'", f'{name_row}',f'{name_row_id}')
+
+        if _selector_:
+            return _selector_[0][1]
+        else:
+            return 'no databases'
+
+def connection_test():
+    mydb = mysql.connector.connect(
+      host="localhost",
+      user="root",
+      password="",
+      database="perfect_employee"
+    )
+
+    if mydb.is_connected():
+        print('polaczono')
+
+    try:
+        selector = """ select * from job_category """
+        cursor = mydb.cursor()
+        cursor.execute(selector)
+        #mydb.commit() ?
+
+        print(cursor.fetchall(),"\n record succesfully printed")
+    except:
+        print("failed to print record")
+
+    finally:
+        if mydb.is_connected():
+            mydb.close()
+            print('polaczenie zakonczone')
+
+def offerPicking(lista_ofert):
+    #deklaracja i sprawdzenie pierwszej strony
+    page_url = "https://it.pracuj.pl/praca/sopot;wp/it%20-%20rozwój%20oprogramowania;cc,5016?rd=30"
+    page = requests.get(page_url)
+    soup = BeautifulSoup(page.content, 'html.parser')
+    p = 0
+    next_page_exist = True
+    while next_page_exist and p<10:
+        next_page_exist = soup.select('div[data-test="section-action-bar"] button[data-test="top-pagination-next-button"][class^="listing_ngj95i6"]')
+        p += 1
+        divs_in_section_offers = soup.select('a[data-test="link-offer"][class="core_n194fgoq"]')
+        page_url_next = (f'{page_url}&pn={p}')
+        page = requests.get(page_url_next)
+        soup = BeautifulSoup(page.content, 'html.parser')
+
+        # Wyświetlamy znalezione divy
+        for div in divs_in_section_offers:
+            if div not in lista_ofert:
+                lista_ofert.append(div)
+
+    print(f'liczba ofert  {len(lista_ofert)}')
+    for g in lista_ofert:
+        print(g)
+
+class offer():
+    title = None
+    description = None
+    company_id = None
+    location = None
+    min_salary = None
+    max_salary = None
+    require_id = None
+    date_posted = None
+    expiration_date = None
+    job_category = None
+
+
+    def __init__(self,title='',description='',company_id='',location='',min_salary='',max_salary='',require_id='',date_posted='',expiration_date='',job_category=''):
+        self.title = title
+        self.description = description
+        self.company_id = company_id
+        self.location = location
+        self.min_salary = min_salary
+        self.max_salary = max_salary
+        self.require_id = require_id
+        self.date_posted = date_posted
+        self.expiration_date = expiration_date
+        self.job_category = job_category
+
+
+db = MysqlPython(host='localhost', user='root', password='', database='perfect_employee')
+#lista_ofert = []
+#offerPicking(lista_ofert)
+#connection_test()
+
+
+
+
+
+#LIST OF REQUIRE INTEGERS FROM FUNCTION:
+nam = 'nowa firma'
+desp = 'opis firmy'
+ind = 'branza'
+loc = 'lokalizacja'
+cont = 'contact'
+cat = 'job_category'
+cat_name = 'category name'
+cat_desp = 'category description'
+
+#check this data if exist
+check_companies = db.check_comp(name_table='companies',name=f'{nam}')
+check_cat = db.check_cat(name_table=f'{cat}',category_name=f'{cat_name}')
+if check_companies== 'no databases':
+    print('no company like this, INSERT IT')
+    db.insert('companies',name=f'{nam}',description=f'{desp}',industry=f'{ind}',location=f'{loc}')
+else:
+    print(check_companies)
+
+if check_cat== 'no databases':
+    print('no company like this, INSERT IT')
+    db.insert('job_category', category_name=f'{cat_name}', description=f'{cat_desp}')
+else:
+    print(check_cat)
+#insert scraped requirements
+
+
